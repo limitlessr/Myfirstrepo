@@ -16,12 +16,6 @@ import streamlit as st
 # Make repo root importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from vector_store import ChromaVectorStore
-from agents import (
-    OrchestratorAgent, ImageAnalysisAgent, DocumentIngestionAgent,
-    RAGQueryAgent, MetadataAgent,
-)
-
 logging.basicConfig(level=logging.INFO)
 
 # ── Page config ────────────────────────────────────────────────────────────
@@ -32,24 +26,50 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Shared state ───────────────────────────────────────────────────────────
-
-@st.cache_resource
-def load_system():
-    store = ChromaVectorStore()
-    orch  = OrchestratorAgent(store)
-    return store, orch
-
-
-store, orchestrator = load_system()
-
-# ── Sidebar — Agent Panel ──────────────────────────────────────────────────
+# ── API Key gate ───────────────────────────────────────────────────────────
+# Allow key to come from env, .env file, or the sidebar input.
+_env_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
 with st.sidebar:
     st.title("🏢 Enterprise Vector Store")
     st.caption("Powered by Claude + ChromaDB")
     st.divider()
 
+    if _env_key:
+        api_key = _env_key
+        st.success("API key loaded from environment.")
+    else:
+        api_key = st.text_input(
+            "Anthropic API Key",
+            type="password",
+            placeholder="sk-ant-...",
+            help="Get yours at https://console.anthropic.com",
+        )
+
+if not api_key:
+    st.info("Enter your **Anthropic API key** in the sidebar to start.")
+    st.stop()
+
+# Inject key so config.py and the Anthropic client pick it up
+os.environ["ANTHROPIC_API_KEY"] = api_key
+
+from vector_store import ChromaVectorStore
+from agents import OrchestratorAgent
+
+# ── Shared state ───────────────────────────────────────────────────────────
+
+@st.cache_resource
+def load_system(key: str):  # key arg busts cache when key changes
+    store = ChromaVectorStore()
+    orch  = OrchestratorAgent(store)
+    return store, orch
+
+
+store, orchestrator = load_system(api_key)
+
+# ── Sidebar — Agent Panel ──────────────────────────────────────────────────
+
+with st.sidebar:
     st.subheader("Active Agents")
     agent_defs = [
         ("🎯", "OrchestratorAgent", "Routes & coordinates"),
