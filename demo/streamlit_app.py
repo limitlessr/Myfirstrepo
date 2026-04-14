@@ -10,6 +10,7 @@ import sys
 import time
 import logging
 import io
+import pypdf
 
 import streamlit as st
 
@@ -222,9 +223,11 @@ with tab_image:
 
 with tab_doc:
     st.header("📄 Document Ingestion Agent")
-    st.caption("Upload PDF documents — even 300+ pages. The agent chunks, embeds, and indexes everything.")
+    st.caption("Upload PDF documents — even 300+ pages. Choose your chunking strategy and parameters below.")
 
-    # ── PDF type guidance ──────────────────────────────────────────────
+    from agents.document_agent import CHUNKING_STRATEGIES, DocumentIngestionAgent as _DocAgent
+
+    # ── PDF upload ─────────────────────────────────────────────────────
     with st.expander("ℹ️ What kind of PDF will work?"):
         st.markdown("""
 | PDF Type | Works? | Notes |
@@ -234,79 +237,168 @@ with tab_doc:
 | Scanned / photographed pages | ❌ No | No text to extract |
 | Password protected | ❌ No | Can't be opened |
 | Mostly images with little text | ⚠️ Partial | Only text portions indexed |
-
-**Not sure?** Upload it — the agent will show you how many characters it found per page.
-If most pages show `chars: 0`, your PDF is likely scanned.
         """)
 
-    pdf_file = st.file_uploader(
-        "Upload a PDF (up to 500 MB)",
-        type=["pdf"],
-        key="pdf_tab",
-    )
+    pdf_file = st.file_uploader("Upload a PDF (up to 500 MB)", type=["pdf"], key="pdf_tab")
 
     if pdf_file:
         file_size_mb = len(pdf_file.getvalue()) / (1024 * 1024)
-        st.caption(f"File size: {file_size_mb:.1f} MB")
+        st.caption(f"File: **{pdf_file.name}**  |  Size: {file_size_mb:.1f} MB")
         if file_size_mb > 50:
-            st.warning(f"Large file ({file_size_mb:.0f} MB) — ingestion may take 2–5 minutes. Please wait.")
+            st.warning(f"Large file ({file_size_mb:.0f} MB) — ingestion may take 2–5 minutes.")
 
     c1, c2 = st.columns(2)
-    dept = c1.text_input("Department (optional)", placeholder="Underwriting")
-    pol_id = c2.text_input("Policy ID (optional)", placeholder="P-2024-001")
+    dept   = c1.text_input("Department (optional)", placeholder="Underwriting")
+    pol_id = c2.text_input("Policy ID (optional)",  placeholder="P-2024-001")
 
+    st.divider()
+
+    # ── Chunking settings panel ────────────────────────────────────────
+    st.subheader("⚙️ Chunking Settings")
+    st.caption("These control how the document is split before being stored. Different strategies suit different document types.")
+
+    # Strategy picker
+    strategy_keys   = list(CHUNKING_STRATEGIES.keys())
+    strategy_labels = [CHUNKING_STRATEGIES[k]["label"] for k in strategy_keys]
+    chosen_label    = st.radio(
+        "Chunking Strategy",
+        strategy_labels,
+        index=0,
+        horizontal=True,
+    )
+    chosen_strategy = strategy_keys[strategy_labels.index(chosen_label)]
+    strat_info      = CHUNKING_STRATEGIES[chosen_strategy]
+
+    st.info(f"**{strat_info['label']}** — {strat_info['description']}")
+
+    # Parameters
+    supports_overlap = strat_info["supports_overlap"]
+    p1, p2, p3 = st.columns(3)
+
+    chunk_size = p1.slider(
+        "Chunk size (characters)",
+        min_value=200,
+        max_value=3000,
+        value=1000,
+        step=100,
+        help="Maximum number of characters in one chunk. Smaller = more precise retrieval. Larger = more context per chunk.",
+    )
+
+    chunk_overlap = p2.slider(
+        "Overlap (characters)",
+        min_value=0,
+        max_value=500,
+        value=200 if supports_overlap else 0,
+        step=50,
+        disabled=not supports_overlap,
+        help="How many characters the next chunk repeats from the previous one. Prevents losing meaning at boundaries. Not used by Paragraph or Page strategies.",
+    )
+
+    min_chunk_len = p3.slider(
+        "Min chunk length",
+        min_value=0,
+        max_value=200,
+        value=50,
+        step=10,
+        help="Chunks shorter than this are discarded. Removes headers, page numbers, and blank fragments.",
+    )
+
+    # ── Live preview ───────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🔬 Live Chunk Preview")
+    st.caption("See exactly how the first page of your PDF will be chunked with the current settings — before committing to ingest.")
+
+    preview_btn = st.button("👁️ Preview chunks from first page", disabled=pdf_file is None)
+
+    if preview_btn and pdf_file:
+        with st.spinner("Extracting first page…"):
+            raw  = pypdf.PdfReader(io.BytesIO(pdf_file.getvalue()))
+            page_text = ""
+            for p in raw.pages[:3]:   # try first 3 pages to find one with text
+                page_text = p.extract_text() or ""
+                if page_text.strip():
+                    break
+
+        if not page_text.strip():
+            st.error("No text found in the first pages — this PDF may be scanned.")
+        else:
+            helper = _DocAgent.__new__(_DocAgent)
+            previews = helper.preview_chunks(
+                page_text, chosen_strategy, chunk_size, chunk_overlap, min_chunk_len
+            )
+            st.success(f"**{len(previews)} chunks** would be created from this page using **{chosen_label}** strategy.")
+
+            for row in previews:
+                with st.expander(f"Chunk {row['chunk_#']}  —  {row['length']} characters"):
+                    st.text(row["preview"])
+
+    st.divider()
+
+    # ── Ingest button ──────────────────────────────────────────────────
     ingest_btn = st.button("📥 Ingest Document", type="primary", disabled=pdf_file is None)
 
     if ingest_btn and pdf_file:
         pdf_bytes = pdf_file.read()
-        extra = {}
-        if dept:
-            extra["department"] = dept
-        if pol_id:
-            extra["policy_id"] = pol_id
+        extra: dict = {}
+        if dept:   extra["department"] = dept
+        if pol_id: extra["policy_id"]  = pol_id
 
         status_box = st.empty()
         progress   = st.progress(0, text="Reading PDF…")
+        status_box.info(
+            f"📄 DocumentIngestionAgent is processing **{pdf_file.name}** "
+            f"using **{chosen_label}** strategy…"
+        )
+        progress.progress(10, text="Extracting and chunking text…")
 
-        status_box.info("📄 DocumentIngestionAgent is reading your PDF page by page…")
-        progress.progress(10, text="Extracting text from pages…")
-
-        result = orchestrator.ingest_document(pdf_bytes, pdf_file.name, extra or None)
+        result = orchestrator.ingest_document(
+            pdf_bytes,
+            pdf_file.name,
+            extra or None,
+            strategy=chosen_strategy,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap if supports_overlap else 0,
+            min_chunk_length=min_chunk_len,
+        )
 
         progress.progress(100, text="✅ Done!")
 
         if result.success:
-            data = result.data
+            data         = result.data
             total_pages  = data.get("total_pages", 0)
             total_chunks = data.get("total_chunks", 0)
+            avg_len      = data.get("avg_chunk_length", 0)
             page_stats   = data.get("page_stats", [])
             empty_pages  = sum(1 for p in page_stats if p.get("chars", 0) == 0)
 
             status_box.success(f"✅ {result.message}")
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Pages", total_pages)
+            c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Pages",          total_pages)
             c2.metric("Chunks created", total_chunks)
-            c3.metric("Empty pages", empty_pages,
-                      help="Pages with no extractable text — usually images or blanks")
-            c4.metric("Time taken", f"{result.duration_ms / 1000:.1f}s")
+            c3.metric("Avg chunk size", f"{avg_len} chars")
+            c4.metric("Empty pages",    empty_pages)
+            c5.metric("Time taken",     f"{result.duration_ms / 1000:.1f}s")
 
-            # Warn if mostly empty — likely a scanned PDF
+            # Strategy summary badge
+            st.markdown(
+                f"**Strategy used:** `{data.get('strategy')}` &nbsp;|&nbsp; "
+                f"**Chunk size:** `{data.get('chunk_size')}` &nbsp;|&nbsp; "
+                f"**Overlap:** `{data.get('chunk_overlap')}`"
+            )
+
             if total_pages > 0 and empty_pages / total_pages > 0.5:
                 st.error(
-                    f"⚠️ {empty_pages} out of {total_pages} pages had no text. "
-                    "This PDF is likely **scanned** (photographed pages). "
-                    "The system cannot extract text from images inside PDFs. "
-                    "Try a PDF that was digitally created or exported from Word/Google Docs."
+                    f"⚠️ {empty_pages} of {total_pages} pages had no text. "
+                    "This PDF is likely scanned. Try a digitally created PDF."
                 )
             elif total_chunks == 0:
-                st.error("No text could be extracted from this PDF. It may be scanned or image-only.")
+                st.error("No text could be extracted. The PDF may be scanned or image-only.")
             else:
-                st.info(f"✅ Document is now searchable. Go to the **💬 AI Assistant** tab and ask questions about it.")
+                st.info("✅ Document is now searchable. Go to the **💬 AI Assistant** tab and ask questions about it.")
 
-            with st.expander(f"Page-level breakdown (showing first 50 of {total_pages} pages)"):
-                if page_stats:
-                    st.dataframe(page_stats[:50])
+            with st.expander(f"Page-level breakdown (first 50 of {total_pages} pages)"):
+                st.dataframe(page_stats[:50])
         else:
             status_box.error(f"Ingestion failed: {result.message}")
 

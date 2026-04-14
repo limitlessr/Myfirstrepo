@@ -66,11 +66,25 @@ class OrchestratorAgent(BaseAgent):
             description=f"analyse {filename}",
         )
 
-    def ingest_document(self, pdf_bytes: bytes, filename: str,
-                        extra_meta: dict | None = None) -> AgentResult:
-        self._log(f"Routing document ingestion for '{filename}'")
+    def ingest_document(
+        self,
+        pdf_bytes: bytes,
+        filename: str,
+        extra_meta: dict | None = None,
+        strategy: str = "recursive",
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+        min_chunk_length: int = 50,
+    ) -> AgentResult:
+        self._log(f"Routing document ingestion for '{filename}' [{strategy}]")
         return self._agents["document"].run(
-            pdf_bytes=pdf_bytes, filename=filename, extra_meta=extra_meta,
+            pdf_bytes=pdf_bytes,
+            filename=filename,
+            extra_meta=extra_meta,
+            strategy=strategy,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            min_chunk_length=min_chunk_length,
             description=f"ingest {filename}",
         )
 
