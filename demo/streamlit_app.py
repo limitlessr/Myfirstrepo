@@ -224,7 +224,33 @@ with tab_doc:
     st.header("📄 Document Ingestion Agent")
     st.caption("Upload PDF documents — even 300+ pages. The agent chunks, embeds, and indexes everything.")
 
-    pdf_file = st.file_uploader("Upload a PDF", type=["pdf"], key="pdf_tab")
+    # ── PDF type guidance ──────────────────────────────────────────────
+    with st.expander("ℹ️ What kind of PDF will work?"):
+        st.markdown("""
+| PDF Type | Works? | Notes |
+|---|---|---|
+| Exported from Word / Google Docs | ✅ Yes | Best results |
+| Typed digital document | ✅ Yes | Works great |
+| Scanned / photographed pages | ❌ No | No text to extract |
+| Password protected | ❌ No | Can't be opened |
+| Mostly images with little text | ⚠️ Partial | Only text portions indexed |
+
+**Not sure?** Upload it — the agent will show you how many characters it found per page.
+If most pages show `chars: 0`, your PDF is likely scanned.
+        """)
+
+    pdf_file = st.file_uploader(
+        "Upload a PDF (up to 500 MB)",
+        type=["pdf"],
+        key="pdf_tab",
+    )
+
+    if pdf_file:
+        file_size_mb = len(pdf_file.getvalue()) / (1024 * 1024)
+        st.caption(f"File size: {file_size_mb:.1f} MB")
+        if file_size_mb > 50:
+            st.warning(f"Large file ({file_size_mb:.0f} MB) — ingestion may take 2–5 minutes. Please wait.")
+
     c1, c2 = st.columns(2)
     dept = c1.text_input("Department (optional)", placeholder="Underwriting")
     pol_id = c2.text_input("Policy ID (optional)", placeholder="P-2024-001")
@@ -239,28 +265,50 @@ with tab_doc:
         if pol_id:
             extra["policy_id"] = pol_id
 
-        progress = st.progress(0, text="Starting ingestion…")
-        with st.spinner(f"DocumentIngestionAgent processing {pdf_file.name}…"):
-            result = orchestrator.ingest_document(pdf_bytes, pdf_file.name, extra or None)
+        status_box = st.empty()
+        progress   = st.progress(0, text="Reading PDF…")
 
-        progress.progress(100, text="Done!")
+        status_box.info("📄 DocumentIngestionAgent is reading your PDF page by page…")
+        progress.progress(10, text="Extracting text from pages…")
+
+        result = orchestrator.ingest_document(pdf_bytes, pdf_file.name, extra or None)
+
+        progress.progress(100, text="✅ Done!")
 
         if result.success:
             data = result.data
-            st.success(f"✅ {result.message}")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Pages", data.get("total_pages", 0))
-            c2.metric("Chunks created", data.get("total_chunks", 0))
-            c3.metric("Duration", f"{result.duration_ms:.0f} ms")
+            total_pages  = data.get("total_pages", 0)
+            total_chunks = data.get("total_chunks", 0)
+            page_stats   = data.get("page_stats", [])
+            empty_pages  = sum(1 for p in page_stats if p.get("chars", 0) == 0)
 
-            with st.expander("Page-level breakdown (first 20 pages)"):
-                page_stats = data.get("page_stats", [])[:20]
+            status_box.success(f"✅ {result.message}")
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Pages", total_pages)
+            c2.metric("Chunks created", total_chunks)
+            c3.metric("Empty pages", empty_pages,
+                      help="Pages with no extractable text — usually images or blanks")
+            c4.metric("Time taken", f"{result.duration_ms / 1000:.1f}s")
+
+            # Warn if mostly empty — likely a scanned PDF
+            if total_pages > 0 and empty_pages / total_pages > 0.5:
+                st.error(
+                    f"⚠️ {empty_pages} out of {total_pages} pages had no text. "
+                    "This PDF is likely **scanned** (photographed pages). "
+                    "The system cannot extract text from images inside PDFs. "
+                    "Try a PDF that was digitally created or exported from Word/Google Docs."
+                )
+            elif total_chunks == 0:
+                st.error("No text could be extracted from this PDF. It may be scanned or image-only.")
+            else:
+                st.info(f"✅ Document is now searchable. Go to the **💬 AI Assistant** tab and ask questions about it.")
+
+            with st.expander(f"Page-level breakdown (showing first 50 of {total_pages} pages)"):
                 if page_stats:
-                    st.dataframe(page_stats)
-
-            st.info("Document is now searchable in the AI Assistant tab.")
+                    st.dataframe(page_stats[:50])
         else:
-            st.error(f"Ingestion failed: {result.message}")
+            status_box.error(f"Ingestion failed: {result.message}")
 
 # ══════════════════════════════════════════════════════════════════════════
 # TAB 4 — Knowledge Base / Vector Store Explorer
