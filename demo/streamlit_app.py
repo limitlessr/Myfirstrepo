@@ -27,6 +27,255 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Google-style CSS ───────────────────────────────────────────────────────
+st.markdown("""
+<style>
+/* ── Google Fonts — Roboto ── */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Google+Sans:wght@400;500;700&display=swap');
+
+/* ── Global reset ── */
+html, body, [class*="css"] {
+    font-family: 'Roboto', 'Google Sans', Arial, sans-serif !important;
+    color: #202124 !important;
+}
+
+/* ── App background ── */
+.stApp {
+    background-color: #ffffff !important;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+    background-color: #f8f9fa !important;
+    border-right: 1px solid #e8eaed !important;
+}
+[data-testid="stSidebar"] * {
+    color: #202124 !important;
+}
+
+/* ── Top header bar ── */
+[data-testid="stHeader"] {
+    background-color: #ffffff !important;
+    border-bottom: 1px solid #e8eaed !important;
+}
+
+/* ── Headings ── */
+h1 {
+    font-family: 'Google Sans', 'Roboto', Arial, sans-serif !important;
+    font-size: 24px !important;
+    font-weight: 400 !important;
+    color: #202124 !important;
+    letter-spacing: -0.3px !important;
+}
+h2 {
+    font-family: 'Google Sans', 'Roboto', Arial, sans-serif !important;
+    font-size: 18px !important;
+    font-weight: 500 !important;
+    color: #202124 !important;
+}
+h3 {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    color: #202124 !important;
+}
+
+/* ── Tabs ── */
+[data-testid="stTabs"] button {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: #5f6368 !important;
+    border-bottom: 3px solid transparent !important;
+    padding: 10px 16px !important;
+    background: transparent !important;
+}
+[data-testid="stTabs"] button[aria-selected="true"] {
+    color: #1a73e8 !important;
+    border-bottom: 3px solid #1a73e8 !important;
+}
+[data-testid="stTabs"] button:hover {
+    color: #1a73e8 !important;
+    background-color: #f1f3f4 !important;
+    border-radius: 4px 4px 0 0 !important;
+}
+
+/* ── Primary buttons ── */
+[data-testid="stButton"] button[kind="primary"],
+.stButton button[kind="primary"] {
+    background-color: #1a73e8 !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 4px !important;
+    font-family: 'Google Sans', 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    padding: 8px 24px !important;
+    box-shadow: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15) !important;
+    transition: box-shadow .15s, background-color .15s !important;
+}
+[data-testid="stButton"] button[kind="primary"]:hover {
+    background-color: #1765cc !important;
+    box-shadow: 0 1px 3px rgba(60,64,67,.3), 0 4px 8px 3px rgba(60,64,67,.15) !important;
+}
+
+/* ── Secondary buttons ── */
+[data-testid="stButton"] button[kind="secondary"],
+.stButton button:not([kind="primary"]) {
+    background-color: #ffffff !important;
+    color: #1a73e8 !important;
+    border: 1px solid #dadce0 !important;
+    border-radius: 4px !important;
+    font-family: 'Google Sans', 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    padding: 8px 24px !important;
+}
+[data-testid="stButton"] button:not([kind="primary"]):hover {
+    background-color: #f8f9fa !important;
+    border-color: #1a73e8 !important;
+}
+
+/* ── Text inputs ── */
+[data-testid="stTextInput"] input,
+[data-testid="stTextArea"] textarea {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    color: #202124 !important;
+    border: 1px solid #dadce0 !important;
+    border-radius: 4px !important;
+    background-color: #ffffff !important;
+    padding: 8px 12px !important;
+}
+[data-testid="stTextInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus {
+    border-color: #1a73e8 !important;
+    box-shadow: 0 0 0 2px rgba(26,115,232,.2) !important;
+    outline: none !important;
+}
+
+/* ── Selectbox / dropdowns ── */
+[data-testid="stSelectbox"] div[data-baseweb="select"] {
+    border: 1px solid #dadce0 !important;
+    border-radius: 4px !important;
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+}
+
+/* ── Sliders ── */
+[data-testid="stSlider"] div[role="slider"] {
+    background-color: #1a73e8 !important;
+}
+[data-testid="stSlider"] .st-bq {
+    background-color: #1a73e8 !important;
+}
+
+/* ── Toggle / checkbox ── */
+[data-testid="stToggle"] span[data-checked="true"] {
+    background-color: #1a73e8 !important;
+}
+
+/* ── Info / success / warning / error boxes ── */
+[data-testid="stAlert"] {
+    border-radius: 4px !important;
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    border-left-width: 4px !important;
+}
+
+/* ── Metrics ── */
+[data-testid="stMetric"] label {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 12px !important;
+    color: #5f6368 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+}
+[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-family: 'Google Sans', 'Roboto', Arial, sans-serif !important;
+    font-size: 28px !important;
+    font-weight: 400 !important;
+    color: #202124 !important;
+}
+
+/* ── Expanders ── */
+[data-testid="stExpander"] {
+    border: 1px solid #e8eaed !important;
+    border-radius: 4px !important;
+    margin-bottom: 8px !important;
+}
+[data-testid="stExpander"] summary {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    color: #202124 !important;
+    padding: 10px 16px !important;
+}
+
+/* ── Dividers ── */
+hr {
+    border: none !important;
+    border-top: 1px solid #e8eaed !important;
+    margin: 16px 0 !important;
+}
+
+/* ── Caption / small text ── */
+[data-testid="stCaptionContainer"] p,
+small, .caption {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 12px !important;
+    color: #5f6368 !important;
+}
+
+/* ── Radio buttons ── */
+[data-testid="stRadio"] label {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    color: #202124 !important;
+}
+
+/* ── Dataframe / table ── */
+[data-testid="stDataFrame"] {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 13px !important;
+    border: 1px solid #e8eaed !important;
+    border-radius: 4px !important;
+}
+
+/* ── Chat messages ── */
+[data-testid="stChatMessage"] {
+    font-family: 'Roboto', Arial, sans-serif !important;
+    font-size: 14px !important;
+    border-radius: 8px !important;
+    border: 1px solid #e8eaed !important;
+    margin-bottom: 8px !important;
+}
+
+/* ── Progress bar ── */
+[data-testid="stProgress"] div {
+    background-color: #1a73e8 !important;
+    border-radius: 4px !important;
+}
+
+/* ── File uploader ── */
+[data-testid="stFileUploader"] {
+    border: 2px dashed #dadce0 !important;
+    border-radius: 8px !important;
+    background-color: #f8f9fa !important;
+    padding: 16px !important;
+}
+[data-testid="stFileUploader"]:hover {
+    border-color: #1a73e8 !important;
+    background-color: #e8f0fe !important;
+}
+
+/* ── Spinner ── */
+[data-testid="stSpinner"] {
+    color: #1a73e8 !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # ── API Key gate ───────────────────────────────────────────────────────────
 # Allow key to come from env, .env file, or the sidebar input.
 _env_key = os.environ.get("ANTHROPIC_API_KEY", "")
