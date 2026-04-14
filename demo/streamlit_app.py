@@ -235,10 +235,6 @@ with tab_doc:
         if file_size_mb > 50:
             st.warning(f"Large file ({file_size_mb:.0f} MB) — ingestion may take 2–5 minutes.")
 
-    c1, c2 = st.columns(2)
-    dept   = c1.text_input("Department (optional)", placeholder="Underwriting")
-    pol_id = c2.text_input("Policy ID (optional)",  placeholder="P-2024-001")
-
     st.divider()
 
     # ── Expert Mode toggle ─────────────────────────────────────────────
@@ -347,9 +343,6 @@ with tab_doc:
 
     if ingest_btn and pdf_file:
         pdf_bytes = pdf_file.read()
-        extra: dict = {}
-        if dept:   extra["department"] = dept
-        if pol_id: extra["policy_id"]  = pol_id
 
         status_box = st.empty()
         progress   = st.progress(0, text="Reading PDF…")
@@ -362,7 +355,6 @@ with tab_doc:
         result = orchestrator.ingest_document(
             pdf_bytes,
             pdf_file.name,
-            extra or None,
             strategy=chosen_strategy,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap if supports_overlap else 0,
