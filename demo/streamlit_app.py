@@ -68,21 +68,9 @@ def load_system(key: str):  # key arg busts cache when key changes
 
 store, orchestrator = load_system(api_key)
 
-# ── Sidebar — Agent Panel ──────────────────────────────────────────────────
+# ── Sidebar — Stats only ───────────────────────────────────────────────────
 
 with st.sidebar:
-    st.subheader("Active Agents")
-    agent_defs = [
-        ("🎯", "OrchestratorAgent", "Routes & coordinates"),
-        ("🖼️", "ImageAnalysisAgent", "Vision & cat detection"),
-        ("📄", "DocumentIngestionAgent", "PDF → vector store"),
-        ("🔍", "RAGQueryAgent", "Retrieval + synthesis"),
-        ("🗂️", "MetadataAgent", "Governance & inventory"),
-    ]
-    for emoji, name, desc in agent_defs:
-        st.success(f"{emoji} **{name}**  \n{desc}")
-
-    st.divider()
     stats_result = orchestrator.get_metadata(action="stats")
     stats = stats_result.data or {}
     col1, col2 = st.columns(2)
