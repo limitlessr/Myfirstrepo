@@ -253,84 +253,104 @@ with tab_doc:
 
     st.divider()
 
-    # ── Chunking settings panel ────────────────────────────────────────
-    st.subheader("⚙️ Chunking Settings")
-    st.caption("These control how the document is split before being stored. Different strategies suit different document types.")
+    # ── Expert Mode toggle ─────────────────────────────────────────────
+    expert_col, _ = st.columns([1, 3])
+    expert_mode = expert_col.toggle("🧪 Expert Mode", value=False,
+                                    help="Unlock chunking strategy and algorithm parameters")
 
-    # Strategy picker
-    strategy_keys   = list(CHUNKING_STRATEGIES.keys())
-    strategy_labels = [CHUNKING_STRATEGIES[k]["label"] for k in strategy_keys]
-    chosen_label    = st.radio(
-        "Chunking Strategy",
-        strategy_labels,
-        index=0,
-        horizontal=True,
-    )
-    chosen_strategy = strategy_keys[strategy_labels.index(chosen_label)]
-    strat_info      = CHUNKING_STRATEGIES[chosen_strategy]
+    # Defaults used when Expert Mode is off
+    chosen_strategy  = "recursive"
+    chosen_label     = "Recursive (Recommended)"
+    chunk_size       = 1000
+    chunk_overlap    = 200
+    min_chunk_len    = 50
+    supports_overlap = True
 
-    st.info(f"**{strat_info['label']}** — {strat_info['description']}")
+    if expert_mode:
+        st.info("**Expert Mode on** — configure how the document is split before being stored in the vector store.")
 
-    # Parameters
-    supports_overlap = strat_info["supports_overlap"]
-    p1, p2, p3 = st.columns(3)
+        # ── Strategy picker ────────────────────────────────────────────
+        st.subheader("① Chunking Strategy")
+        st.caption("Choose the algorithm that decides where to cut the document into pieces.")
 
-    chunk_size = p1.slider(
-        "Chunk size (characters)",
-        min_value=200,
-        max_value=3000,
-        value=1000,
-        step=100,
-        help="Maximum number of characters in one chunk. Smaller = more precise retrieval. Larger = more context per chunk.",
-    )
+        strategy_keys   = list(CHUNKING_STRATEGIES.keys())
+        strategy_labels = [CHUNKING_STRATEGIES[k]["label"] for k in strategy_keys]
+        chosen_label    = st.radio(
+            "Strategy",
+            strategy_labels,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        chosen_strategy  = strategy_keys[strategy_labels.index(chosen_label)]
+        strat_info       = CHUNKING_STRATEGIES[chosen_strategy]
+        supports_overlap = strat_info["supports_overlap"]
 
-    chunk_overlap = p2.slider(
-        "Overlap (characters)",
-        min_value=0,
-        max_value=500,
-        value=200 if supports_overlap else 0,
-        step=50,
-        disabled=not supports_overlap,
-        help="How many characters the next chunk repeats from the previous one. Prevents losing meaning at boundaries. Not used by Paragraph or Page strategies.",
-    )
+        st.info(f"**{strat_info['label']}** — {strat_info['description']}")
 
-    min_chunk_len = p3.slider(
-        "Min chunk length",
-        min_value=0,
-        max_value=200,
-        value=50,
-        step=10,
-        help="Chunks shorter than this are discarded. Removes headers, page numbers, and blank fragments.",
-    )
+        # ── Parameters ────────────────────────────────────────────────
+        st.subheader("② Parameters")
+        st.caption("Fine-tune how the chosen strategy behaves.")
 
-    # ── Live preview ───────────────────────────────────────────────────
-    st.divider()
-    st.subheader("🔬 Live Chunk Preview")
-    st.caption("See exactly how the first page of your PDF will be chunked with the current settings — before committing to ingest.")
+        p1, p2, p3 = st.columns(3)
 
-    preview_btn = st.button("👁️ Preview chunks from first page", disabled=pdf_file is None)
+        chunk_size = p1.slider(
+            "Chunk size (characters)",
+            min_value=200, max_value=3000, value=1000, step=100,
+            help="Max characters per chunk. Smaller = precise retrieval. Larger = more context.",
+        )
+        chunk_overlap = p2.slider(
+            "Overlap (characters)",
+            min_value=0, max_value=500,
+            value=200 if supports_overlap else 0,
+            step=50,
+            disabled=not supports_overlap,
+            help="Characters repeated between consecutive chunks to avoid losing context at boundaries. Disabled for Paragraph and Page strategies.",
+        )
+        min_chunk_len = p3.slider(
+            "Min chunk length",
+            min_value=0, max_value=200, value=50, step=10,
+            help="Discard chunks shorter than this. Removes stray headers, page numbers, and blank lines.",
+        )
 
-    if preview_btn and pdf_file:
-        with st.spinner("Extracting first page…"):
-            raw  = pypdf.PdfReader(io.BytesIO(pdf_file.getvalue()))
-            page_text = ""
-            for p in raw.pages[:3]:   # try first 3 pages to find one with text
-                page_text = p.extract_text() or ""
-                if page_text.strip():
-                    break
+        # ── Live preview ───────────────────────────────────────────────
+        st.subheader("③ Live Chunk Preview")
+        st.caption("See exactly how page 1 of your PDF will be split — without saving anything.")
 
-        if not page_text.strip():
-            st.error("No text found in the first pages — this PDF may be scanned.")
-        else:
-            helper = _DocAgent.__new__(_DocAgent)
-            previews = helper.preview_chunks(
-                page_text, chosen_strategy, chunk_size, chunk_overlap, min_chunk_len
-            )
-            st.success(f"**{len(previews)} chunks** would be created from this page using **{chosen_label}** strategy.")
+        preview_btn = st.button("👁️ Preview chunks from first page", disabled=pdf_file is None)
 
-            for row in previews:
-                with st.expander(f"Chunk {row['chunk_#']}  —  {row['length']} characters"):
-                    st.text(row["preview"])
+        if preview_btn and pdf_file:
+            with st.spinner("Extracting first page…"):
+                raw = pypdf.PdfReader(io.BytesIO(pdf_file.getvalue()))
+                page_text = ""
+                for p in raw.pages[:3]:
+                    page_text = p.extract_text() or ""
+                    if page_text.strip():
+                        break
+
+            if not page_text.strip():
+                st.error("No text found in the first pages — this PDF may be scanned.")
+            else:
+                helper   = _DocAgent.__new__(_DocAgent)
+                previews = helper.preview_chunks(
+                    page_text, chosen_strategy, chunk_size, chunk_overlap, min_chunk_len
+                )
+                st.success(
+                    f"**{len(previews)} chunks** would be created from this page "
+                    f"using **{chosen_label}** (size={chunk_size}, overlap={chunk_overlap})."
+                )
+                for row in previews:
+                    with st.expander(f"Chunk {row['chunk_#']}  —  {row['length']} chars"):
+                        st.text(row["preview"])
+
+        st.divider()
+
+    else:
+        # Show a compact summary of what defaults will be used
+        st.caption(
+            "Using defaults: **Recursive** strategy · chunk size **1000** · overlap **200** · min length **50**. "
+            "Enable Expert Mode above to customise."
+        )
 
     st.divider()
 
