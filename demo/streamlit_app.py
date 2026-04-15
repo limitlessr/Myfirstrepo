@@ -28,7 +28,6 @@ st.set_page_config(
 )
 
 # ── API Key gate ───────────────────────────────────────────────────────────
-# Allow key to come from env, .env file, or the sidebar input.
 _env_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
 with st.sidebar:
@@ -51,12 +50,12 @@ if not api_key:
     st.info("Enter your **Anthropic API key** in the sidebar to start.")
     st.stop()
 
-# Inject key so config.py and the Anthropic client pick it up
 os.environ["ANTHROPIC_API_KEY"] = api_key
 
 import config
 from vector_store import ChromaVectorStore
 from agents import OrchestratorAgent
+from agents.document_agent import CHUNKING_STRATEGIES, DocumentIngestionAgent as _DocAgent
 
 # ── Shared state ───────────────────────────────────────────────────────────
 
@@ -76,7 +75,6 @@ store, orchestrator = load_system(api_key, st.session_state.active_collection)
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    # Collection selector
     st.subheader("📦 Active Collection")
     all_cols = store.list_collections()
     col_names = [c["name"] for c in all_cols] or [st.session_state.active_collection]
@@ -93,7 +91,6 @@ with st.sidebar:
         st.cache_resource.clear()
         st.rerun()
 
-    # Stats for active collection
     stats_result = orchestrator.get_metadata(action="stats")
     stats = stats_result.data or {}
     col1, col2 = st.columns(2)
@@ -120,26 +117,35 @@ with tab_chat:
     # ── Expert Mode toggle ─────────────────────────────────────────────
     exp_col, _ = st.columns([1, 3])
     chat_expert = exp_col.toggle("🧪 Expert Mode", value=False, key="chat_expert",
-                                 help="Unlock retrieval settings and see agent internals")
+                                 help="Unlock retrieval settings, chunking options, and collection management")
 
-    # Defaults
+    # ── Defaults (used when Expert Mode is off) ────────────────────────
     chat_top_k       = 5
     chat_source      = None
     chat_doc_type    = None
     show_routing     = False
     show_sources     = False
+    chosen_strategy  = "recursive"
+    chosen_label     = "Recursive (Recommended)"
+    chunk_size       = 1000
+    chunk_overlap    = 200
+    min_chunk_len    = 50
+    supports_overlap = True
 
     if chat_expert:
-        st.info("**Expert Mode on** — configure retrieval settings and inspect agent internals.")
+        st.info("**Expert Mode on** — all advanced settings are available below.")
+
+        # ── Section 1: RAG Retrieval Settings ─────────────────────────
+        st.subheader("🔍 Retrieval Settings")
+        st.caption("Controls how the AI Assistant searches the knowledge base when answering questions.")
 
         sources_list = [s["source"] for s in (store.list_sources() or [])]
-
         x1, x2, x3 = st.columns(3)
 
         chat_top_k = x1.slider(
             "Chunks to retrieve (top-k)",
             min_value=1, max_value=15, value=5,
-            help="How many passages from the knowledge base are fetched before Claude writes the answer. More = broader context, slower response.",
+            help="How many passages from the knowledge base are fetched before Claude writes the answer.",
         )
         chat_doc_type = x2.selectbox(
             "Filter by document type",
@@ -161,11 +167,116 @@ with tab_chat:
         show_routing = st.checkbox("Show agent routing", value=True,
                                    help="Display which agent handled the request and why.")
         show_sources = st.checkbox("Show source passages", value=True,
-                                   help="Show the exact chunks retrieved from the knowledge base to build the answer.")
+                                   help="Show the exact chunks retrieved from the knowledge base.")
 
         st.divider()
+
+        # ── Section 2: Chunking Settings ──────────────────────────────
+        st.subheader("✂️ Chunking Settings")
+        st.caption("Controls how PDFs are split into pieces when uploaded. Applied when you ingest a document.")
+
+        strategy_keys   = list(CHUNKING_STRATEGIES.keys())
+        strategy_labels = [CHUNKING_STRATEGIES[k]["label"] for k in strategy_keys]
+        chosen_label = st.radio(
+            "Strategy",
+            strategy_labels,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        chosen_strategy  = strategy_keys[strategy_labels.index(chosen_label)]
+        strat_info       = CHUNKING_STRATEGIES[chosen_strategy]
+        supports_overlap = strat_info["supports_overlap"]
+
+        st.info(f"**{strat_info['label']}** — {strat_info['description']}")
+
+        p1, p2, p3 = st.columns(3)
+        chunk_size = p1.slider(
+            "Chunk size (characters)",
+            min_value=200, max_value=3000, value=1000, step=100,
+            help="Max characters per chunk. Smaller = precise retrieval. Larger = more context.",
+        )
+        chunk_overlap = p2.slider(
+            "Overlap (characters)",
+            min_value=0, max_value=500,
+            value=200 if supports_overlap else 0,
+            step=50,
+            disabled=not supports_overlap,
+            help="Characters repeated between consecutive chunks to avoid losing context at boundaries.",
+        )
+        min_chunk_len = p3.slider(
+            "Min chunk length",
+            min_value=0, max_value=200, value=50, step=10,
+            help="Discard chunks shorter than this. Removes stray headers and page numbers.",
+        )
+
+        st.divider()
+
+        # ── Section 3: Collection Manager ─────────────────────────────
+        st.subheader("📦 Collection Manager")
+        st.caption(
+            "Collections are separate knowledge bases — one per team, project, or document type. "
+            "Switch between them in the sidebar."
+        )
+
+        collections = store.list_collections()
+
+        if not collections:
+            st.info("No collections found — the default will be created on first upload.")
+        else:
+            cols_cm = st.columns(min(len(collections), 3))
+            for idx, col_info in enumerate(collections):
+                with cols_cm[idx % 3]:
+                    is_active = col_info["active"]
+                    border = "🟢" if is_active else "⚪"
+                    st.markdown(f"**{border} {col_info['name']}**")
+                    st.caption(col_info.get("description") or "No description")
+                    st.markdown(f"`{col_info['chunks']}` chunks")
+
+                    if is_active:
+                        st.success("Active", icon="✅")
+                    else:
+                        bcol1, bcol2 = st.columns(2)
+                        if bcol1.button("Switch", key=f"sw_{col_info['name']}", use_container_width=True):
+                            st.session_state.active_collection = col_info["name"]
+                            st.cache_resource.clear()
+                            st.rerun()
+                        if bcol2.button("Delete", key=f"dl_{col_info['name']}", use_container_width=True):
+                            if store.delete_collection(col_info["name"]):
+                                st.success(f"Deleted '{col_info['name']}'")
+                                st.rerun()
+                            else:
+                                st.error("Could not delete.")
+
+        st.markdown("**Create a new collection**")
+        nc1, nc2, nc3 = st.columns([2, 3, 1])
+        new_col_name = nc1.text_input(
+            "Name", placeholder="e.g. underwriting_2024",
+            label_visibility="collapsed", key="new_col_name",
+            help="Use only letters, numbers, hyphens, and underscores.",
+        )
+        new_col_desc = nc2.text_input(
+            "Description (optional)", placeholder="e.g. Underwriting policies for 2024",
+            label_visibility="collapsed", key="new_col_desc",
+        )
+        if nc3.button("➕ Create", use_container_width=True):
+            if not new_col_name.strip():
+                st.warning("Please enter a collection name.")
+            else:
+                created = store.create_new_collection(new_col_name.strip(), new_col_desc.strip())
+                if created:
+                    st.success(f"Collection **'{new_col_name}'** created. Switch to it from the sidebar.")
+                    st.rerun()
+                else:
+                    st.error(f"A collection named **'{new_col_name}'** already exists.")
+
+        st.divider()
+
     else:
-        st.caption("Using defaults: top-k **5** · all documents · all types. Enable Expert Mode to customise.")
+        st.caption(
+            "Using defaults: top-k **5** · all documents · **Recursive** chunking · chunk size **1000**. "
+            "Enable Expert Mode above to customise."
+        )
 
     # ── Chat history ───────────────────────────────────────────────────
     if "chat_history" not in st.session_state:
@@ -212,7 +323,6 @@ with tab_chat:
                 doc_type=chat_doc_type,
             )
 
-        # Format answer
         if result.success and result.data:
             data = result.data
             if isinstance(data, dict) and "answer" in data:
@@ -271,7 +381,6 @@ with tab_image:
 
             if result.success:
                 data = result.data
-                # Cat verdict banner
                 if data.get("is_cat"):
                     st.success("🐱 YES — A CAT IS PRESENT!")
                 else:
@@ -297,11 +406,8 @@ with tab_image:
 
 with tab_doc:
     st.header("📄 Document Ingestion Agent")
-    st.caption("Upload PDF documents — even 300+ pages. Choose your chunking strategy and parameters below.")
+    st.caption("Upload PDF documents — even 300+ pages. The document will be chunked and stored in the knowledge base.")
 
-    from agents.document_agent import CHUNKING_STRATEGIES, DocumentIngestionAgent as _DocAgent
-
-    # ── PDF upload ─────────────────────────────────────────────────────
     with st.expander("ℹ️ What kind of PDF will work?"):
         st.markdown("""
 | PDF Type | Works? | Notes |
@@ -321,73 +427,19 @@ with tab_doc:
         if file_size_mb > 50:
             st.warning(f"Large file ({file_size_mb:.0f} MB) — ingestion may take 2–5 minutes.")
 
-    st.divider()
+    # Show current chunking settings (configured in AI Assistant Expert Mode)
+    st.info(
+        f"**Chunking settings:** {chosen_label} · chunk size {chunk_size} · "
+        f"overlap {chunk_overlap if supports_overlap else 0} · min length {min_chunk_len}. "
+        f"{'*(defaults)*' if not chat_expert else '*(from Expert Mode)*'} — "
+        "change in the **💬 AI Assistant** tab → Expert Mode."
+    )
 
-    # ── Expert Mode toggle ─────────────────────────────────────────────
-    expert_col, _ = st.columns([1, 3])
-    expert_mode = expert_col.toggle("🧪 Expert Mode", value=False,
-                                    help="Unlock chunking strategy and algorithm parameters")
-
-    # Defaults used when Expert Mode is off
-    chosen_strategy  = "recursive"
-    chosen_label     = "Recursive (Recommended)"
-    chunk_size       = 1000
-    chunk_overlap    = 200
-    min_chunk_len    = 50
-    supports_overlap = True
-
-    if expert_mode:
-        st.info("**Expert Mode on** — configure how the document is split before being stored in the vector store.")
-
-        # ── Strategy picker ────────────────────────────────────────────
-        st.subheader("① Chunking Strategy")
-        st.caption("Choose the algorithm that decides where to cut the document into pieces.")
-
-        strategy_keys   = list(CHUNKING_STRATEGIES.keys())
-        strategy_labels = [CHUNKING_STRATEGIES[k]["label"] for k in strategy_keys]
-        chosen_label    = st.radio(
-            "Strategy",
-            strategy_labels,
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-        chosen_strategy  = strategy_keys[strategy_labels.index(chosen_label)]
-        strat_info       = CHUNKING_STRATEGIES[chosen_strategy]
-        supports_overlap = strat_info["supports_overlap"]
-
-        st.info(f"**{strat_info['label']}** — {strat_info['description']}")
-
-        # ── Parameters ────────────────────────────────────────────────
-        st.subheader("② Parameters")
-        st.caption("Fine-tune how the chosen strategy behaves.")
-
-        p1, p2, p3 = st.columns(3)
-
-        chunk_size = p1.slider(
-            "Chunk size (characters)",
-            min_value=200, max_value=3000, value=1000, step=100,
-            help="Max characters per chunk. Smaller = precise retrieval. Larger = more context.",
-        )
-        chunk_overlap = p2.slider(
-            "Overlap (characters)",
-            min_value=0, max_value=500,
-            value=200 if supports_overlap else 0,
-            step=50,
-            disabled=not supports_overlap,
-            help="Characters repeated between consecutive chunks to avoid losing context at boundaries. Disabled for Paragraph and Page strategies.",
-        )
-        min_chunk_len = p3.slider(
-            "Min chunk length",
-            min_value=0, max_value=200, value=50, step=10,
-            help="Discard chunks shorter than this. Removes stray headers, page numbers, and blank lines.",
-        )
-
-        # ── Live preview ───────────────────────────────────────────────
-        st.subheader("③ Live Chunk Preview")
-        st.caption("See exactly how page 1 of your PDF will be split — without saving anything.")
-
-        preview_btn = st.button("👁️ Preview chunks from first page", disabled=pdf_file is None)
+    # Live preview (needs the PDF file, so it stays here)
+    if chat_expert:
+        st.subheader("👁️ Live Chunk Preview")
+        st.caption("See exactly how the first pages of your PDF will be split — without saving anything.")
+        preview_btn = st.button("Preview chunks from first page", disabled=pdf_file is None)
 
         if preview_btn and pdf_file:
             with st.spinner("Extracting first page…"):
@@ -414,15 +466,6 @@ with tab_doc:
                         st.text(row["preview"])
 
         st.divider()
-
-    else:
-        # Show a compact summary of what defaults will be used
-        st.caption(
-            "Using defaults: **Recursive** strategy · chunk size **1000** · overlap **200** · min length **50**. "
-            "Enable Expert Mode above to customise."
-        )
-
-    st.divider()
 
     # ── Ingest button ──────────────────────────────────────────────────
     ingest_btn = st.button("📥 Ingest Document", type="primary", disabled=pdf_file is None)
@@ -466,7 +509,6 @@ with tab_doc:
             c4.metric("Empty pages",    empty_pages)
             c5.metric("Time taken",     f"{result.duration_ms / 1000:.1f}s")
 
-            # Strategy summary badge
             st.markdown(
                 f"**Strategy used:** `{data.get('strategy')}` &nbsp;|&nbsp; "
                 f"**Chunk size:** `{data.get('chunk_size')}` &nbsp;|&nbsp; "
@@ -494,76 +536,8 @@ with tab_doc:
 
 with tab_store:
     st.header("🗄️ Knowledge Base Explorer")
-    st.caption("Browse documents, search the vector store, and manage collections.")
+    st.caption("Browse indexed documents, run semantic searches, and generate inventory reports.")
 
-    # ── Expert Mode toggle ─────────────────────────────────────────────
-    kb_exp_col, _ = st.columns([1, 3])
-    kb_expert = kb_exp_col.toggle("🧪 Expert Mode", value=False, key="kb_expert",
-                                   help="Unlock collection create, switch, and delete controls")
-
-    # ══ Section 1 — Collection Manager (Expert Mode only) ═════════════
-    if kb_expert:
-        st.subheader("📦 Collection Manager")
-        st.caption(
-            "Collections are separate knowledge bases — one per team, project, or document type. "
-            "Switch between them in the sidebar. Active collection is used by all agents."
-        )
-
-        collections = store.list_collections()
-
-        if not collections:
-            st.info("No collections found — the default will be created on first upload.")
-        else:
-            cols = st.columns(min(len(collections), 3))
-            for idx, col_info in enumerate(collections):
-                with cols[idx % 3]:
-                    is_active = col_info["active"]
-                    border = "🟢" if is_active else "⚪"
-                    st.markdown(f"**{border} {col_info['name']}**")
-                    st.caption(col_info.get("description") or "No description")
-                    st.markdown(f"`{col_info['chunks']}` chunks")
-
-                    if is_active:
-                        st.success("Active", icon="✅")
-                    else:
-                        bcol1, bcol2 = st.columns(2)
-                        if bcol1.button("Switch", key=f"sw_{col_info['name']}", use_container_width=True):
-                            st.session_state.active_collection = col_info["name"]
-                            st.cache_resource.clear()
-                            st.rerun()
-                        if bcol2.button("Delete", key=f"dl_{col_info['name']}", use_container_width=True):
-                            if store.delete_collection(col_info["name"]):
-                                st.success(f"Deleted '{col_info['name']}'")
-                                st.rerun()
-                            else:
-                                st.error("Could not delete.")
-
-        st.divider()
-        st.markdown("**Create a new collection**")
-        nc1, nc2, nc3 = st.columns([2, 3, 1])
-        new_col_name = nc1.text_input(
-            "Name", placeholder="e.g. underwriting_2024",
-            label_visibility="collapsed", key="new_col_name",
-            help="Use only letters, numbers, hyphens, and underscores.",
-        )
-        new_col_desc = nc2.text_input(
-            "Description (optional)", placeholder="e.g. Underwriting policies for 2024",
-            label_visibility="collapsed", key="new_col_desc",
-        )
-        if nc3.button("➕ Create", use_container_width=True):
-            if not new_col_name.strip():
-                st.warning("Please enter a collection name.")
-            else:
-                created = store.create_new_collection(new_col_name.strip(), new_col_desc.strip())
-                if created:
-                    st.success(f"Collection **'{new_col_name}'** created. Switch to it from the sidebar.")
-                    st.rerun()
-                else:
-                    st.error(f"A collection named **'{new_col_name}'** already exists.")
-
-        st.divider()
-
-    # ══ Section 2 — Documents in active collection ════════════════════
     st.subheader(f"📁 Documents in '{st.session_state.active_collection}'")
 
     col_left, col_right = st.columns([1, 2])
