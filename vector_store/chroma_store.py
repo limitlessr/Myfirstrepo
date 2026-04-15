@@ -127,3 +127,61 @@ class ChromaVectorStore:
             metadata={"hnsw:space": "cosine"},
         )
         logger.warning("Collection '%s' reset.", self.collection_name)
+
+    # ------------------------------------------------------------------
+    # Multi-collection management
+    # ------------------------------------------------------------------
+
+    def list_collections(self) -> list[dict[str, Any]]:
+        """Return all collections with name, chunk count, and description."""
+        result = []
+        for col in self._client.list_collections():
+            try:
+                count = self._client.get_collection(
+                    col.name, embedding_function=self._embedding_fn
+                ).count()
+            except Exception:
+                count = 0
+            result.append({
+                "name":        col.name,
+                "chunks":      count,
+                "active":      col.name == self.collection_name,
+                "description": (col.metadata or {}).get("description", ""),
+            })
+        return sorted(result, key=lambda x: x["name"])
+
+    def create_new_collection(self, name: str, description: str = "") -> bool:
+        """Create a new named collection. Returns True if created, False if already exists."""
+        existing = [c.name for c in self._client.list_collections()]
+        if name in existing:
+            return False
+        self._client.create_collection(
+            name=name,
+            embedding_function=self._embedding_fn,
+            metadata={"hnsw:space": "cosine", "description": description},
+        )
+        logger.info("Created new collection '%s'", name)
+        return True
+
+    def delete_collection(self, name: str) -> bool:
+        """Delete a collection by name. Cannot delete the active one."""
+        if name == self.collection_name:
+            logger.warning("Cannot delete the active collection '%s'", name)
+            return False
+        try:
+            self._client.delete_collection(name)
+            logger.info("Deleted collection '%s'", name)
+            return True
+        except Exception as e:
+            logger.error("Failed to delete collection '%s': %s", name, e)
+            return False
+
+    def switch_collection(self, name: str) -> None:
+        """Switch the active collection to *name* (must already exist)."""
+        self.collection_name = name
+        self._collection = self._client.get_or_create_collection(
+            name=name,
+            embedding_function=self._embedding_fn,
+            metadata={"hnsw:space": "cosine"},
+        )
+        logger.info("Switched active collection to '%s'", name)

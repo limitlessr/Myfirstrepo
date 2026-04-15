@@ -60,24 +60,46 @@ from agents import OrchestratorAgent
 # ── Shared state ───────────────────────────────────────────────────────────
 
 @st.cache_resource
-def load_system(key: str):  # key arg busts cache when key changes
-    store = ChromaVectorStore()
+def load_system(key: str, collection: str):
+    store = ChromaVectorStore(collection_name=collection)
     orch  = OrchestratorAgent(store)
     return store, orch
 
 
-store, orchestrator = load_system(api_key)
+# ── Active collection state ────────────────────────────────────────────────
+if "active_collection" not in st.session_state:
+    st.session_state.active_collection = config.COLLECTION_NAME
 
-# ── Sidebar — Stats only ───────────────────────────────────────────────────
+store, orchestrator = load_system(api_key, st.session_state.active_collection)
+
+# ── Sidebar ────────────────────────────────────────────────────────────────
 
 with st.sidebar:
+    # Collection selector
+    st.subheader("📦 Active Collection")
+    all_cols = store.list_collections()
+    col_names = [c["name"] for c in all_cols] or [st.session_state.active_collection]
+
+    selected = st.selectbox(
+        "Collection",
+        options=col_names,
+        index=col_names.index(st.session_state.active_collection)
+              if st.session_state.active_collection in col_names else 0,
+        label_visibility="collapsed",
+    )
+    if selected != st.session_state.active_collection:
+        st.session_state.active_collection = selected
+        st.cache_resource.clear()
+        st.rerun()
+
+    # Stats for active collection
     stats_result = orchestrator.get_metadata(action="stats")
     stats = stats_result.data or {}
     col1, col2 = st.columns(2)
-    col1.metric("Total Chunks", stats.get("total_chunks", 0))
+    col1.metric("Chunks", stats.get("total_chunks", 0))
     col2.metric("Sources", stats.get("total_sources", 0))
 
-    if st.button("🔄 Refresh Stats"):
+    if st.button("🔄 Refresh", use_container_width=True):
         st.rerun()
 
 # ── Main tabs ──────────────────────────────────────────────────────────────
@@ -471,22 +493,87 @@ with tab_doc:
 
 with tab_store:
     st.header("🗄️ Knowledge Base Explorer")
-    st.caption("Browse and manage everything indexed in the vector store.")
+    st.caption("Browse documents, search the vector store, and manage collections.")
+
+    # ══ Section 1 — Collection Manager ════════════════════════════════
+    st.subheader("📦 Collection Manager")
+    st.caption(
+        "Collections are separate knowledge bases. Each one stores its own documents. "
+        "Switch collections in the sidebar to change which one all agents use."
+    )
+
+    collections = store.list_collections()
+
+    if not collections:
+        st.info("No collections found — the default will be created on first upload.")
+    else:
+        # Grid of collection cards
+        cols = st.columns(min(len(collections), 3))
+        for idx, col_info in enumerate(collections):
+            with cols[idx % 3]:
+                is_active = col_info["active"]
+                border = "🟢" if is_active else "⚪"
+                st.markdown(f"**{border} {col_info['name']}**")
+                st.caption(col_info.get("description") or "No description")
+                st.markdown(f"`{col_info['chunks']}` chunks")
+
+                if is_active:
+                    st.success("Active", icon="✅")
+                else:
+                    bcol1, bcol2 = st.columns(2)
+                    if bcol1.button("Switch", key=f"sw_{col_info['name']}", use_container_width=True):
+                        st.session_state.active_collection = col_info["name"]
+                        st.cache_resource.clear()
+                        st.rerun()
+                    if bcol2.button("Delete", key=f"dl_{col_info['name']}", use_container_width=True):
+                        if store.delete_collection(col_info["name"]):
+                            st.success(f"Deleted '{col_info['name']}'")
+                            st.rerun()
+                        else:
+                            st.error("Could not delete.")
+
+    # Create new collection form
+    st.divider()
+    st.markdown("**Create a new collection**")
+    nc1, nc2, nc3 = st.columns([2, 3, 1])
+    new_col_name = nc1.text_input(
+        "Name", placeholder="e.g. underwriting_2024",
+        label_visibility="collapsed", key="new_col_name",
+        help="Use only letters, numbers, hyphens, and underscores.",
+    )
+    new_col_desc = nc2.text_input(
+        "Description (optional)", placeholder="e.g. Underwriting policies for 2024",
+        label_visibility="collapsed", key="new_col_desc",
+    )
+    if nc3.button("➕ Create", use_container_width=True):
+        if not new_col_name.strip():
+            st.warning("Please enter a collection name.")
+        else:
+            created = store.create_new_collection(new_col_name.strip(), new_col_desc.strip())
+            if created:
+                st.success(f"Collection **'{new_col_name}'** created. Switch to it from the sidebar or the cards above.")
+                st.rerun()
+            else:
+                st.error(f"A collection named **'{new_col_name}'** already exists.")
+
+    st.divider()
+
+    # ══ Section 2 — Documents in active collection ════════════════════
+    st.subheader(f"📁 Documents in '{st.session_state.active_collection}'")
 
     col_left, col_right = st.columns([1, 2])
 
     with col_left:
-        st.subheader("Indexed Sources")
         list_result = orchestrator.get_metadata(action="list")
         sources = (list_result.data or {}).get("sources", [])
         if not sources:
-            st.warning("No documents indexed yet.")
+            st.warning("No documents indexed in this collection yet.")
         else:
             for src in sources:
-                with st.expander(f"📁 {src['source']}"):
+                with st.expander(f"📄 {src['source']}"):
                     st.write(f"**Type:** {src['doc_type']}")
                     st.write(f"**Chunks:** {src['chunk_count']}")
-                    if st.button(f"🗑️ Delete", key=f"del_{src['source']}"):
+                    if st.button("🗑️ Delete document", key=f"del_{src['source']}"):
                         del_result = orchestrator.get_metadata(action="delete", source=src["source"])
                         st.success(del_result.message) if del_result.success else st.error(del_result.message)
                         st.rerun()
