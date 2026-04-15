@@ -108,13 +108,20 @@ class OrchestratorAgent(BaseAgent):
     # Intelligent chat routing (natural language → agent)
     # ------------------------------------------------------------------
 
-    def chat(self, message: str, attachments: dict[str, Any] | None = None) -> AgentResult:
+    def chat(self, message: str, attachments: dict[str, Any] | None = None,
+             top_k: int = 5, source_filter: str | None = None,
+             doc_type: str | None = None) -> AgentResult:
         """
         Handle a free-form chat message and dispatch to the right agent.
 
         attachments can contain:
           {"image_bytes": bytes, "filename": str}  or
           {"pdf_bytes": bytes, "filename": str}
+
+        Expert-mode params:
+          top_k          — number of chunks to retrieve for RAG queries
+          source_filter  — restrict search to a specific document filename
+          doc_type       — restrict search to "pdf" or "image"
         """
         attachments = attachments or {}
         self._log(f"Chat message received: '{message[:80]}'")
@@ -134,7 +141,6 @@ class OrchestratorAgent(BaseAgent):
         try:
             decision = json.loads(raw_json.strip().strip("```json").strip("```"))
         except json.JSONDecodeError:
-            # Fallback: if we have pdf try document, if query text do query
             if "pdf_bytes" in attachments:
                 decision = {"agent": "document", "reasoning": "PDF attachment detected", "params": {}}
             elif "image_bytes" in attachments:
@@ -172,7 +178,9 @@ class OrchestratorAgent(BaseAgent):
             if ingest_result.success:
                 result = self._agents["query"].run(
                     query=message,
+                    top_k=top_k,
                     source_filter=attachments.get("filename"),
+                    doc_type=doc_type,
                     description="pipeline: query step",
                 )
                 result.metadata["ingest"] = ingest_result.data
@@ -189,6 +197,9 @@ class OrchestratorAgent(BaseAgent):
             # Default: RAG query
             result = self._agents["query"].run(
                 query=message,
+                top_k=top_k,
+                source_filter=source_filter,
+                doc_type=doc_type,
                 description="RAG query via chat",
             )
 

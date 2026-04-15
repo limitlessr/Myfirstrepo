@@ -94,29 +94,86 @@ with tab_chat:
     st.header("💬 Enterprise AI Assistant")
     st.caption("Ask anything. Attach an image or PDF. The Orchestrator routes your request to the right agent.")
 
+    # ── Expert Mode toggle ─────────────────────────────────────────────
+    exp_col, _ = st.columns([1, 3])
+    chat_expert = exp_col.toggle("🧪 Expert Mode", value=False, key="chat_expert",
+                                 help="Unlock retrieval settings and see agent internals")
+
+    # Defaults
+    chat_top_k       = 5
+    chat_source      = None
+    chat_doc_type    = None
+    show_routing     = False
+    show_sources     = False
+
+    if chat_expert:
+        st.info("**Expert Mode on** — configure retrieval settings and inspect agent internals.")
+
+        sources_list = [s["source"] for s in (store.list_sources() or [])]
+
+        x1, x2, x3 = st.columns(3)
+
+        chat_top_k = x1.slider(
+            "Chunks to retrieve (top-k)",
+            min_value=1, max_value=15, value=5,
+            help="How many passages from the knowledge base are fetched before Claude writes the answer. More = broader context, slower response.",
+        )
+        chat_doc_type = x2.selectbox(
+            "Filter by document type",
+            options=["All", "pdf", "image"],
+            index=0,
+            help="Restrict the search to only PDFs, only image analyses, or search everything.",
+        )
+        chat_doc_type = None if chat_doc_type == "All" else chat_doc_type
+
+        source_options = ["All documents"] + sources_list
+        chosen_source = x3.selectbox(
+            "Filter by document",
+            options=source_options,
+            index=0,
+            help="Search only within a specific uploaded file.",
+        )
+        chat_source = None if chosen_source == "All documents" else chosen_source
+
+        show_routing = st.checkbox("Show agent routing", value=True,
+                                   help="Display which agent handled the request and why.")
+        show_sources = st.checkbox("Show source passages", value=True,
+                                   help="Show the exact chunks retrieved from the knowledge base to build the answer.")
+
+        st.divider()
+    else:
+        st.caption("Using defaults: top-k **5** · all documents · all types. Enable Expert Mode to customise.")
+
+    # ── Chat history ───────────────────────────────────────────────────
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
 
-    # Display conversation
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            if msg.get("meta"):
-                with st.expander("Agent details"):
-                    st.json(msg["meta"])
+            if chat_expert and msg.get("routing"):
+                with st.expander("🎯 Agent routing"):
+                    st.json(msg["routing"])
+            if chat_expert and msg.get("sources"):
+                with st.expander(f"📄 Source passages used ({len(msg['sources'])})"):
+                    for src in msg["sources"]:
+                        st.markdown(
+                            f"**{src['source']}** — page {src['page'] or '—'}  "
+                            f"*(relevance score: {1 - (src.get('distance') or 0):.2f})*"
+                        )
 
-    # Input area
+    # ── Input area ─────────────────────────────────────────────────────
     with st.form("chat_form", clear_on_submit=True):
-        user_input = st.text_input("Your message", placeholder="e.g. What does this document say about claims?")
+        user_input    = st.text_input("Your message", placeholder="e.g. What does this document say about claims?")
         attached_file = st.file_uploader("Optional attachment (image or PDF)", key="chat_file")
-        submitted = st.form_submit_button("Send ➤")
+        submitted     = st.form_submit_button("Send ➤")
 
     if submitted and user_input:
         st.session_state.chat_history.append({"role": "user", "content": user_input})
 
         attachments = {}
         if attached_file:
-            fname = attached_file.name
+            fname   = attached_file.name
             content = attached_file.read()
             if fname.lower().endswith(".pdf"):
                 attachments = {"pdf_bytes": content, "filename": fname}
@@ -124,7 +181,13 @@ with tab_chat:
                 attachments = {"image_bytes": content, "filename": fname}
 
         with st.spinner("Agents working…"):
-            result = orchestrator.chat(user_input, attachments or None)
+            result = orchestrator.chat(
+                user_input,
+                attachments or None,
+                top_k=chat_top_k,
+                source_filter=chat_source,
+                doc_type=chat_doc_type,
+            )
 
         # Format answer
         if result.success and result.data:
@@ -144,12 +207,12 @@ with tab_chat:
         else:
             reply = f"Error: {result.message}"
 
-        meta = {
-            "agent": result.agent,
-            "duration_ms": f"{result.duration_ms:.0f}ms",
-            "routing": result.metadata.get("routing", {}),
-        }
-        st.session_state.chat_history.append({"role": "assistant", "content": reply, "meta": meta})
+        entry = {"role": "assistant", "content": reply}
+        if result.data and isinstance(result.data, dict):
+            entry["sources"]  = result.data.get("sources", [])
+        entry["routing"] = result.metadata.get("routing", {})
+
+        st.session_state.chat_history.append(entry)
         st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════
