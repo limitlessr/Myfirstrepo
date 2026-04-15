@@ -54,6 +54,7 @@ if not api_key:
 # Inject key so config.py and the Anthropic client pick it up
 os.environ["ANTHROPIC_API_KEY"] = api_key
 
+import config
 from vector_store import ChromaVectorStore
 from agents import OrchestratorAgent
 
