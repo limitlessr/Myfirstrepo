@@ -495,68 +495,72 @@ with tab_store:
     st.header("🗄️ Knowledge Base Explorer")
     st.caption("Browse documents, search the vector store, and manage collections.")
 
-    # ══ Section 1 — Collection Manager ════════════════════════════════
-    st.subheader("📦 Collection Manager")
-    st.caption(
-        "Collections are separate knowledge bases. Each one stores its own documents. "
-        "Switch collections in the sidebar to change which one all agents use."
-    )
+    # ── Expert Mode toggle ─────────────────────────────────────────────
+    kb_exp_col, _ = st.columns([1, 3])
+    kb_expert = kb_exp_col.toggle("🧪 Expert Mode", value=False, key="kb_expert",
+                                   help="Unlock collection create, switch, and delete controls")
 
-    collections = store.list_collections()
+    # ══ Section 1 — Collection Manager (Expert Mode only) ═════════════
+    if kb_expert:
+        st.subheader("📦 Collection Manager")
+        st.caption(
+            "Collections are separate knowledge bases — one per team, project, or document type. "
+            "Switch between them in the sidebar. Active collection is used by all agents."
+        )
 
-    if not collections:
-        st.info("No collections found — the default will be created on first upload.")
-    else:
-        # Grid of collection cards
-        cols = st.columns(min(len(collections), 3))
-        for idx, col_info in enumerate(collections):
-            with cols[idx % 3]:
-                is_active = col_info["active"]
-                border = "🟢" if is_active else "⚪"
-                st.markdown(f"**{border} {col_info['name']}**")
-                st.caption(col_info.get("description") or "No description")
-                st.markdown(f"`{col_info['chunks']}` chunks")
+        collections = store.list_collections()
 
-                if is_active:
-                    st.success("Active", icon="✅")
-                else:
-                    bcol1, bcol2 = st.columns(2)
-                    if bcol1.button("Switch", key=f"sw_{col_info['name']}", use_container_width=True):
-                        st.session_state.active_collection = col_info["name"]
-                        st.cache_resource.clear()
-                        st.rerun()
-                    if bcol2.button("Delete", key=f"dl_{col_info['name']}", use_container_width=True):
-                        if store.delete_collection(col_info["name"]):
-                            st.success(f"Deleted '{col_info['name']}'")
-                            st.rerun()
-                        else:
-                            st.error("Could not delete.")
-
-    # Create new collection form
-    st.divider()
-    st.markdown("**Create a new collection**")
-    nc1, nc2, nc3 = st.columns([2, 3, 1])
-    new_col_name = nc1.text_input(
-        "Name", placeholder="e.g. underwriting_2024",
-        label_visibility="collapsed", key="new_col_name",
-        help="Use only letters, numbers, hyphens, and underscores.",
-    )
-    new_col_desc = nc2.text_input(
-        "Description (optional)", placeholder="e.g. Underwriting policies for 2024",
-        label_visibility="collapsed", key="new_col_desc",
-    )
-    if nc3.button("➕ Create", use_container_width=True):
-        if not new_col_name.strip():
-            st.warning("Please enter a collection name.")
+        if not collections:
+            st.info("No collections found — the default will be created on first upload.")
         else:
-            created = store.create_new_collection(new_col_name.strip(), new_col_desc.strip())
-            if created:
-                st.success(f"Collection **'{new_col_name}'** created. Switch to it from the sidebar or the cards above.")
-                st.rerun()
-            else:
-                st.error(f"A collection named **'{new_col_name}'** already exists.")
+            cols = st.columns(min(len(collections), 3))
+            for idx, col_info in enumerate(collections):
+                with cols[idx % 3]:
+                    is_active = col_info["active"]
+                    border = "🟢" if is_active else "⚪"
+                    st.markdown(f"**{border} {col_info['name']}**")
+                    st.caption(col_info.get("description") or "No description")
+                    st.markdown(f"`{col_info['chunks']}` chunks")
 
-    st.divider()
+                    if is_active:
+                        st.success("Active", icon="✅")
+                    else:
+                        bcol1, bcol2 = st.columns(2)
+                        if bcol1.button("Switch", key=f"sw_{col_info['name']}", use_container_width=True):
+                            st.session_state.active_collection = col_info["name"]
+                            st.cache_resource.clear()
+                            st.rerun()
+                        if bcol2.button("Delete", key=f"dl_{col_info['name']}", use_container_width=True):
+                            if store.delete_collection(col_info["name"]):
+                                st.success(f"Deleted '{col_info['name']}'")
+                                st.rerun()
+                            else:
+                                st.error("Could not delete.")
+
+        st.divider()
+        st.markdown("**Create a new collection**")
+        nc1, nc2, nc3 = st.columns([2, 3, 1])
+        new_col_name = nc1.text_input(
+            "Name", placeholder="e.g. underwriting_2024",
+            label_visibility="collapsed", key="new_col_name",
+            help="Use only letters, numbers, hyphens, and underscores.",
+        )
+        new_col_desc = nc2.text_input(
+            "Description (optional)", placeholder="e.g. Underwriting policies for 2024",
+            label_visibility="collapsed", key="new_col_desc",
+        )
+        if nc3.button("➕ Create", use_container_width=True):
+            if not new_col_name.strip():
+                st.warning("Please enter a collection name.")
+            else:
+                created = store.create_new_collection(new_col_name.strip(), new_col_desc.strip())
+                if created:
+                    st.success(f"Collection **'{new_col_name}'** created. Switch to it from the sidebar.")
+                    st.rerun()
+                else:
+                    st.error(f"A collection named **'{new_col_name}'** already exists.")
+
+        st.divider()
 
     # ══ Section 2 — Documents in active collection ════════════════════
     st.subheader(f"📁 Documents in '{st.session_state.active_collection}'")
