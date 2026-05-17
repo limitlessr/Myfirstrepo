@@ -13,6 +13,7 @@ from .image_agent import ImageAnalysisAgent
 from .document_agent import DocumentIngestionAgent
 from .query_agent import RAGQueryAgent
 from .metadata_agent import MetadataAgent
+from .nl_to_sql_agent import NLToSQLAgent
 from vector_store import ChromaVectorStore
 
 
@@ -30,6 +31,10 @@ Available agents:
                Required input: action ("report"/"list"/"stats"/"delete").
 - "pipeline" : Ingest a document THEN immediately answer a question about it.
                Required input: pdf_bytes + query.
+- "nl_to_sql": Translate a natural-language question into a SQL query.
+               Triggered when the user mentions SQL, database tables, queries,
+               or asks data questions that imply a structured database.
+               Optional extra params: schema (DDL string), db_path, dialect.
 
 Respond with a JSON object only — no prose:
 {
@@ -48,10 +53,11 @@ class OrchestratorAgent(BaseAgent):
         super().__init__()
         self._store = vector_store
         self._agents: dict[str, BaseAgent] = {
-            "image":    ImageAnalysisAgent(vector_store),
-            "document": DocumentIngestionAgent(vector_store),
-            "query":    RAGQueryAgent(vector_store),
-            "metadata": MetadataAgent(vector_store),
+            "image":     ImageAnalysisAgent(vector_store),
+            "document":  DocumentIngestionAgent(vector_store),
+            "query":     RAGQueryAgent(vector_store),
+            "metadata":  MetadataAgent(vector_store),
+            "nl_to_sql": NLToSQLAgent(),
         }
 
     # ------------------------------------------------------------------
@@ -94,6 +100,24 @@ class OrchestratorAgent(BaseAgent):
         return self._agents["query"].run(
             query=text, top_k=top_k, doc_type=doc_type,
             description="RAG query",
+        )
+
+    def nl_to_sql(
+        self,
+        question: str,
+        schema: str = "",
+        db_path: str | None = None,
+        dialect: str = "sqlite",
+        max_rows: int = 100,
+    ) -> AgentResult:
+        self._log(f"Routing NL-to-SQL: '{question[:60]}'")
+        return self._agents["nl_to_sql"].run(
+            question=question,
+            schema=schema,
+            db_path=db_path,
+            dialect=dialect,
+            max_rows=max_rows,
+            description="nl_to_sql",
         )
 
     def get_metadata(self, action: str = "report",
@@ -191,6 +215,16 @@ class OrchestratorAgent(BaseAgent):
             action = decision.get("params", {}).get("action", "report")
             result = self._agents["metadata"].run(
                 action=action, description=f"metadata {action}",
+            )
+
+        elif chosen == "nl_to_sql":
+            extra = decision.get("params", {})
+            result = self._agents["nl_to_sql"].run(
+                question=message,
+                schema=extra.get("schema", ""),
+                db_path=extra.get("db_path"),
+                dialect=extra.get("dialect", "sqlite"),
+                description="nl_to_sql via chat",
             )
 
         else:
